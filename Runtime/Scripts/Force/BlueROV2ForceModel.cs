@@ -61,6 +61,7 @@ namespace DefaultNamespace
         double I_x = 0.26; // [kg*m^2], from OSBS's CAD
         double I_y = 0.23; // [kg*m^2], from OSBS's CAD
         double I_z = 0.37; // [kg*m^2], from OSBS's CAD
+        private Vector<double> uvw_prev = Vector<double>.Build.DenseOfArray(new double[] { 0, 0, 0 });
 
         public void Start()
         {
@@ -78,10 +79,25 @@ namespace DefaultNamespace
             
             // To NED coordinates
             var xyz = world_pos.To<NED>().ToDense();
-            var phiThetaTau = FRD.ConvertAngularVelocityFromRUF(world_rot).ToDense();
-            var uvw = inverseTransformDirection.To<NED>().ToDense(); // Might need to revisit. Rel. velocity in point m block.
-            var pqr = FRD.ConvertAngularVelocityFromRUF(transformAngularVelocity).ToDense(); // FRD is same as NED for ANGLES ONLY
+            var x_b = xyz[0];
+            var y_b = xyz[1];
+            var z_b = xyz[2];
             
+            var phiThetaTau = FRD.ConvertAngularVelocityFromRUF(world_rot).ToDense();
+            float phi = (float) phiThetaTau[0]; 
+            float theta = (float) phiThetaTau[1];
+            
+            var uvw = inverseTransformDirection.To<NED>().ToDense(); // Might need to revisit. Rel. velocity in point m block.
+            float u = (float) uvw[0];
+            float v = (float) uvw[1];
+            float w = (float) uvw[2];
+            
+            var pqr = FRD.ConvertAngularVelocityFromRUF(transformAngularVelocity).ToDense(); // FRD is same as NED for ANGLES ONLY
+            float p = (float) pqr[0];
+            float q = (float) pqr[1];
+            float r = (float) pqr[2];
+            
+            /* Getting inertia tensor from OSBS CAD instead of getting it from Unity
             // Inertia tensor
             Matrix<double> I_o = DenseMatrix.OfArray(new double[,]
             {
@@ -89,17 +105,17 @@ namespace DefaultNamespace
                 { 0, mainBody.inertiaTensor.z, 0 },
                 { 0, 0, -mainBody.inertiaTensor.y } //Here we use the inertia configured in Unity. Could replace if you want.
             });
-
+            */
             // From eq 2 in OSBS
             // For M
+            //Vector<double> I_vec = Vector<double>.Build.DenseOfArray(new double [] {I_x, I_y, I_z}); // TODO: check how we actually create diagonal matrices 
+            Vector3 I_vec = new Vector3((float) I_x, (float) I_y, (float) I_z);
             Matrix<double> I_c = DenseMatrix.OfDiagonalArray(new double[] {I_x, I_y, I_z}); // TODO: check how we actually create diagonal matrices 
             
             Matrix<double> M_RB = DenseMatrix.OfDiagonalArray(new double[] {m, m, m, I_x, I_y, I_z});
             Matrix<double> M_A = -DenseMatrix.OfDiagonalArray(new double[] {X_udot, Y_vdot, Z_wdot, K_pdot, M_qdot, N_rdot});
             Matrix<double> M = M_RB + M_A;
-
-            // v_dot see TODO above
-
+            
             // For C
             // Matrix<double> someMatrix = DenseMatrix.OfColumnMajor(4, 4,  new double[] { 11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44 });
             Matrix<double> C_RB = DenseMatrix.OfArray(new double[,]
@@ -125,20 +141,20 @@ namespace DefaultNamespace
             // g_vec
             var rho = 1000; // [kg/m^3]
             var nabla = 0.0134; // [m^3], given experimental by OSBS
-            B = rho*g*nabla; // The B given by OSBS
+            B = rho*9.81*nabla; // The B given by OSBS
             Vector<double> g_vec = Vector<double>.Build.DenseOfArray(new double[] 
                 {
                 (W-B)*Mathf.Sin(theta),
                 -(W-B)*Mathf.Cos(theta)*Mathf.Sin(phi),
-                -(W-B)*cos(theta)*cos(phi),
-                y_b*B*cos(theta)*sin(phi)-z_b*B*cos(theta)*sin(phi),
-                -z_b*B*sin(theta)-x_b*B*cos(theta)*sin(phi),
-                x_b*B*cos(theta)*sin(phi)+y_b*B*sin(theta)
+                -(W-B)*Mathf.Cos(theta)*Mathf.Cos(phi),
+                y_b*B*Mathf.Cos(theta)*Mathf.Sin(phi)-z_b*B*Mathf.Cos(theta)*Mathf.Sin(phi),
+                -z_b*B*Mathf.Sin(theta)-x_b*B*Mathf.Cos(theta)*Mathf.Sin(phi),
+                x_b*B*Mathf.Cos(theta)*Mathf.Sin(phi)+y_b*B*Mathf.Sin(theta)
                 }
             );
 
-            mainBody.inertiaTensor = I_o; //Can set inertia hera
-            mainBody.mass = m;
+            mainBody.inertiaTensor = I_vec;  
+            //mainBody.mass = (float) m;
 
             //Usually the control and damping forces need to be computed separately 
             Matrix<double> D = DenseMatrix.OfDiagonalArray(new double[] 
@@ -161,9 +177,9 @@ namespace DefaultNamespace
             });
             Matrix<double> D_of_vel = D + Dn;
 
-            var mainBodyVelocity = mainBody.velocity;
-            var mainBodyAngularVelocity = mainBody.angularVelocity;
-            var mainBodyMass = mainBody.mass;
+            //var mainBodyVelocity = mainBody.velocity;
+            //var mainBodyAngularVelocity = mainBody.angularVelocity;
+            //var mainBodyMass = mainBody.mass;
 
 
             var inverseTransformDirection_local = transform.InverseTransformDirection(mainBody.velocity);
@@ -177,15 +193,19 @@ namespace DefaultNamespace
                 FRD.ConvertAngularVelocityFromRUF(transformAngularVelocity_local).ToDense();
 
             // Do calculations here
-            var tau_sum_control = M*v_dot + C*v + g_vec; // TODO: fix matrix vector multiplication
+            var v_dot = (uvw-uvw_prev)/Time.fixedDeltaTime;
+            var tau_sum_control = M * v_dot + C * uvw + g_vec;
+            uvw_prev = uvw;
 
             // 3 first elements of tau_sum is force control
             // 3 last elements of tau_sum is torque control
-            var resultingForce  = tau_sum.SubVector(0, 3).ToVector3();
-            var resultingTorque = tau_sum.SubVector(4, 6).ToVector3();
+            var resultingForce  = tau_sum_control.SubVector(0, 3).ToVector3();
+            var resultingTorque = tau_sum_control.SubVector(4, 6).ToVector3();
 
             // Dampning forces
-            var tau_sum_dampining = D*v;
+            var v_c = 0; // Assume no ocean current. If desired to integrete it, info about it can be found in OSBS
+            var vr = uvw - v_c;
+            var tau_sum_dampining = D*vr; // TODO: fix matrix multiplication
             var force_damping = tau_sum_dampining.SubVector(0, 3).ToVector3(); //Vector3.zero; //These will be replaced with your model output
             var torque_damping = tau_sum_dampining.SubVector(4, 6).ToVector3();
 
