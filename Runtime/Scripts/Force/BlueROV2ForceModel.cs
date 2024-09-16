@@ -57,7 +57,9 @@ namespace DefaultNamespace
         double K_pdot = 0.189; // [kg*m^2]
         double M_qdot = 0.135; // [kg*m^2]
         double N_rdot = 0.222; // [kg*m^2]
-         
+
+        public Camera myCamera;
+        public Vector3 camera_offset;
         double I_x = 0.26; // [kg*m^2], from OSBS's CAD
         double I_y = 0.23; // [kg*m^2], from OSBS's CAD
         double I_z = 0.37; // [kg*m^2], from OSBS's CAD
@@ -65,14 +67,17 @@ namespace DefaultNamespace
 
         public void Start()
         {
+            myCamera =  Camera.main;
+            camera_offset = new Vector3(0f, 0.5f, -2f);
             // mass 11
             m = mainBody.mass;
-            W = m * 9.81; // In OSBS they use g = 9.82
+            W = m * -9.81; // In OSBS they use g = 9.82
             // TODO: set inertias to main body. kanske också
         }
         
         public void FixedUpdate()
         {
+            
             B = W + vbs * 1.5;
             var world_pos = mainBody.transform.position; // Needs to be verified
             var world_rot = mainBody.transform.rotation.eulerAngles; 
@@ -147,7 +152,7 @@ namespace DefaultNamespace
             // g_vec
             var rho = 1000; // [kg/m^3]
             var nabla = 0.0134; // [m^3], given experimental by OSBS
-            B = rho*9.81*nabla; // The B given by OSBS
+            B = rho*-9.81*nabla; // The B given by OSBS
             Vector<double> g_vec = Vector<double>.Build.DenseOfArray(new double[] 
                 {
                 (W-B)*Mathf.Sin(theta),
@@ -202,19 +207,16 @@ namespace DefaultNamespace
             var vel_vec_dot = (vel_vec-vel_vec_prev)/Time.fixedDeltaTime;
             // TODO: M*vel_vec_dot <- scrap, ersätt med input forces
             // TODO: resulting forces -> lateral forces + coriolis
-            var tau_sum_control = M * vel_vec_dot + C * vel_vec + g_vec;
+            var tau_sum_coriolis =  C * vel_vec;
             vel_vec_prev = vel_vec;
-            Console.WriteLine(tau_sum_control.Count);
 
             // Resulting force and torque vectors
             // 3 first elements of tau_sum is force control
             // 3 last elements of tau_sum is torque control
-            var resultingForce  = tau_sum_control.SubVector(0, 3).ToVector3();
-            var resultingTorque = tau_sum_control.SubVector(3, 3).ToVector3();
-            // var coriolisForce  = tau_sum_control.SubVector(0, 3).ToVector3();
-            // var coriolisTorque = tau_sum_control.SubVector(3, 3).ToVector3();
-            // var lateralForce  = tau_sum_control.SubVector(0, 3).ToVector3();
-            // var lateralTorque = tau_sum_control.SubVector(3, 3).ToVector3();
+            var coriolisForce  = tau_sum_coriolis.SubVector(0, 3).ToVector3();
+            var coriolisTorque = tau_sum_coriolis.SubVector(3, 3).ToVector3();
+            var lateralForce  = g_vec.SubVector(0, 3).ToVector3();
+            var lateralTorque = g_vec.SubVector(3, 3).ToVector3();
 
             // Dampning forces
             var v_c = 0; // Assume no ocean current. If desired to integrete it, info about it can be found in OSBS
@@ -227,10 +229,15 @@ namespace DefaultNamespace
             force_damping = NED.ConvertToRUF(force_damping);
             torque_damping = FRD.ConvertAngularVelocityFromRUF(torque_damping);
             
-            resultingForce = NED.ConvertToRUF(resultingForce);
-            resultingTorque = FRD.ConvertAngularVelocityFromRUF(resultingTorque);
+            coriolisForce = NED.ConvertToRUF(coriolisForce);
+            coriolisTorque = FRD.ConvertAngularVelocityFromRUF(coriolisTorque);
             
+            lateralForce = NED.ConvertToRUF(lateralForce);
+            lateralTorque = FRD.ConvertAngularVelocityFromRUF(lateralTorque);
             
+            // VVV UNCOMMENT FOR FOLLOWING CAMERA VVV
+            myCamera.transform.position = camera_offset + world_pos;
+           
             Vector3 inputForce = Vector3.zero;
             Vector3 inputTorque = Vector3.zero;
             if (Input.GetKey(KeyCode.W))
@@ -277,11 +284,10 @@ namespace DefaultNamespace
             // mainBody.AddForceAtPosition(force_damping,global_com_pos);
             mainBody.AddRelativeForce(force_damping);
             mainBody.AddRelativeTorque(torque_damping);
-            // print(resultingForce);
-            // print(resultingTorque);
-            // mainBody.AddRelativeForce(resultingForce);
-            // mainBody.AddForceAtPosition(resultingForce, global_com_pos);
-            // mainBody.AddRelativeTorque(resultingTorque);
+            mainBody.AddRelativeForce(coriolisForce);
+            // mainBody.AddRelativeTorque(coriolisTorque);
+            mainBody.AddRelativeForce(lateralForce);
+            // mainBody.AddRelativeTorque(lateralTorque);
             mainBody.AddRelativeForce(inputForce);
             // mainBody.AddForceAtPosition(input_force_vector,global_com_pos);
             mainBody.AddRelativeTorque(inputTorque);
