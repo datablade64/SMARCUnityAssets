@@ -61,14 +61,16 @@ namespace DefaultNamespace
         double I_x = 0.26; // [kg*m^2], from OSBS's CAD
         double I_y = 0.23; // [kg*m^2], from OSBS's CAD
         double I_z = 0.37; // [kg*m^2], from OSBS's CAD
-        private Vector<double> uvw_prev = Vector<double>.Build.DenseOfArray(new double[] { 0, 0, 0 });
+        private Vector<double> vel_vec_prev = Vector<double>.Build.DenseOfArray(new double[] { 0, 0, 0 ,0, 0, 0 });
 
         public void Start()
         {
+            // mass 11
             m = mainBody.mass;
             W = m * 9.81; // In OSBS they use g = 9.82
+            // TODO: set inertias to main body. kanske också
         }
-
+        
         public void FixedUpdate()
         {
             B = W + vbs * 1.5;
@@ -79,6 +81,7 @@ namespace DefaultNamespace
             
             // To NED coordinates
             var xyz = world_pos.To<NED>().ToDense();
+            
             var x_b = xyz[0];
             var y_b = xyz[1];
             var z_b = xyz[2];
@@ -96,7 +99,9 @@ namespace DefaultNamespace
             float p = (float) pqr[0];
             float q = (float) pqr[1];
             float r = (float) pqr[2];
-            
+        
+            Vector<double> vel_vec = Vector<double>.Build.DenseOfArray(new double[] { u, v, w, p, q, r });
+             
             /* Getting inertia tensor from OSBS CAD instead of getting it from Unity
             // Inertia tensor
             Matrix<double> I_o = DenseMatrix.OfArray(new double[,]
@@ -112,6 +117,7 @@ namespace DefaultNamespace
             Vector3 I_vec = new Vector3((float) I_x, (float) I_y, (float) I_z);
             Matrix<double> I_c = DenseMatrix.OfDiagonalArray(new double[] {I_x, I_y, I_z}); // TODO: check how we actually create diagonal matrices 
             
+            // TODO: scrap?
             Matrix<double> M_RB = DenseMatrix.OfDiagonalArray(new double[] {m, m, m, I_x, I_y, I_z});
             Matrix<double> M_A = -DenseMatrix.OfDiagonalArray(new double[] {X_udot, Y_vdot, Z_wdot, K_pdot, M_qdot, N_rdot});
             Matrix<double> M = M_RB + M_A;
@@ -157,15 +163,16 @@ namespace DefaultNamespace
             //mainBody.mass = (float) m;
 
             //Usually the control and damping forces need to be computed separately 
-            Matrix<double> D = DenseMatrix.OfDiagonalArray(new double[] 
+            Matrix<double> D = DenseMatrix.OfDiagonalArray(new double[]
             {
                 -Xu,
-                -Yv, 
+                -Yv,
                 -Zw,
                 -Kp,
-                -Mq, 
+                -Mq,
                 -Nr
             });
+            
             Matrix<double> Dn = DenseMatrix.OfDiagonalArray(new double[] 
             {
                 -Xuu*Mathf.Abs(u),
@@ -192,36 +199,92 @@ namespace DefaultNamespace
             var angularVelocity_CorrectCoordinateFrame =
                 FRD.ConvertAngularVelocityFromRUF(transformAngularVelocity_local).ToDense();
 
-            // Do calculations here
-            var v_dot = (uvw-uvw_prev)/Time.fixedDeltaTime;
-            var tau_sum_control = M * v_dot + C * uvw + g_vec;
-            uvw_prev = uvw;
+            var vel_vec_dot = (vel_vec-vel_vec_prev)/Time.fixedDeltaTime;
+            // TODO: M*vel_vec_dot <- scrap, ersätt med input forces
+            // TODO: resulting forces -> lateral forces + coriolis
+            var tau_sum_control = M * vel_vec_dot + C * vel_vec + g_vec;
+            vel_vec_prev = vel_vec;
+            Console.WriteLine(tau_sum_control.Count);
 
+            // Resulting force and torque vectors
             // 3 first elements of tau_sum is force control
             // 3 last elements of tau_sum is torque control
             var resultingForce  = tau_sum_control.SubVector(0, 3).ToVector3();
-            var resultingTorque = tau_sum_control.SubVector(4, 6).ToVector3();
+            var resultingTorque = tau_sum_control.SubVector(3, 3).ToVector3();
+            // var coriolisForce  = tau_sum_control.SubVector(0, 3).ToVector3();
+            // var coriolisTorque = tau_sum_control.SubVector(3, 3).ToVector3();
+            // var lateralForce  = tau_sum_control.SubVector(0, 3).ToVector3();
+            // var lateralTorque = tau_sum_control.SubVector(3, 3).ToVector3();
 
             // Dampning forces
             var v_c = 0; // Assume no ocean current. If desired to integrete it, info about it can be found in OSBS
-            var vr = uvw - v_c;
-            var tau_sum_dampining = D*vr; // TODO: fix matrix multiplication
+            var vr = vel_vec - v_c;
+            var tau_sum_dampining = D_of_vel*vr; // TODO: fix matrix multiplication
             var force_damping = tau_sum_dampining.SubVector(0, 3).ToVector3(); //Vector3.zero; //These will be replaced with your model output
-            var torque_damping = tau_sum_dampining.SubVector(4, 6).ToVector3();
-
-            // Resulting force and torque vectors
-
-            //var resultingForce = Vector3.zero;
-            //var resultingTorque = Vector3.zero;
-
+            var torque_damping = tau_sum_dampining.SubVector(3, 3).ToVector3();
+            
             // Back to RUF (Unity) coordinates)
-            //var forcesUnity = NED.ConvertToRUF(forces);
-            //var momentsUnity = FRD.ConvertAngularVelocityToRUF(moments);
+            force_damping = NED.ConvertToRUF(force_damping);
+            torque_damping = FRD.ConvertAngularVelocityFromRUF(torque_damping);
+            
+            resultingForce = NED.ConvertToRUF(resultingForce);
+            resultingTorque = FRD.ConvertAngularVelocityFromRUF(resultingTorque);
+            
+            
+            Vector3 inputForce = Vector3.zero;
+            Vector3 inputTorque = Vector3.zero;
+            if (Input.GetKey(KeyCode.W))
+            {
+                inputForce[2] = 85;
+            }
+            if (Input.GetKey(KeyCode.A))
+            {
+                inputForce[0] = -85;
+            }
+            if (Input.GetKey(KeyCode.S))
+            {
+                inputForce[2] = -85;
+            }
+            if (Input.GetKey(KeyCode.D))
+            {
+                inputForce[0] = 85;
+            }
+            if (Input.GetKey(KeyCode.Space))
+            {
+                inputForce[1] = 120;
+            }
+            if (Input.GetKey(KeyCode.LeftShift))
+            {
+                inputForce[1] = -120;
+            }
+            if (Input.GetKey(KeyCode.Q))
+            {
+                inputTorque[1] = -14;
+            }
+            if (Input.GetKey(KeyCode.E))
+            {
+                inputTorque[1] = 14;
+            }
 
+            // Vector3 com_pos = new Vector3(-0.17f, 0.11f, -0.13f);
+            // mainBody.centerOfMass = com_pos;
+            // Vector3 global_com_pos = com_pos + mainBody.transform.position;
+            print("x" + vel_vec[0]);
+            print("y" + vel_vec[1]);
+            print("z" + vel_vec[2]);
+            // print(force_damping);
+            // print(torque_damping);
+            // mainBody.AddForceAtPosition(force_damping,global_com_pos);
             mainBody.AddRelativeForce(force_damping);
             mainBody.AddRelativeTorque(torque_damping);
-            mainBody.AddRelativeForce(resultingForce);
-            mainBody.AddRelativeTorque(resultingTorque);
+            // print(resultingForce);
+            // print(resultingTorque);
+            // mainBody.AddRelativeForce(resultingForce);
+            // mainBody.AddForceAtPosition(resultingForce, global_com_pos);
+            // mainBody.AddRelativeTorque(resultingTorque);
+            mainBody.AddRelativeForce(inputForce);
+            // mainBody.AddForceAtPosition(input_force_vector,global_com_pos);
+            mainBody.AddRelativeTorque(inputTorque);
 
 
             // Set RPMs for Visuals
