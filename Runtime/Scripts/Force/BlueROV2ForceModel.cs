@@ -236,7 +236,7 @@ namespace DefaultNamespace
             lateralTorque = FRD.ConvertAngularVelocityFromRUF(lateralTorque);
             
             // VVV UNCOMMENT FOR FOLLOWING CAMERA VVV
-            myCamera.transform.position = camera_offset + world_pos;
+            // myCamera.transform.position = camera_offset + world_pos;
            
             Vector3 inputForce = Vector3.zero;
             Vector3 inputTorque = Vector3.zero;
@@ -273,23 +273,23 @@ namespace DefaultNamespace
                 inputTorque[1] = 14;
             }
 
-            // Vector3 com_pos = new Vector3(-0.17f, 0.11f, -0.13f);
-            // mainBody.centerOfMass = com_pos;
-            // Vector3 global_com_pos = com_pos + mainBody.transform.position;
+            Vector3 com_pos = new Vector3(-0.17f, 0.11f, -0.13f);
+            mainBody.centerOfMass = (com_pos);
+            Vector3 global_com_pos = transform.TransformDirection(com_pos) + mainBody.transform.position;
             print("x" + vel_vec[0]);
             print("y" + vel_vec[1]);
             print("z" + vel_vec[2]);
             // print(force_damping);
             // print(torque_damping);
+            // mainBody.AddRelativeForce(force_damping);
             // mainBody.AddForceAtPosition(force_damping,global_com_pos);
-            mainBody.AddRelativeForce(force_damping);
-            mainBody.AddRelativeTorque(torque_damping);
-            mainBody.AddRelativeForce(coriolisForce);
-            // mainBody.AddRelativeTorque(coriolisTorque);
-            mainBody.AddRelativeForce(lateralForce);
-            // mainBody.AddRelativeTorque(lateralTorque);
-            mainBody.AddRelativeForce(inputForce);
-            // mainBody.AddForceAtPosition(input_force_vector,global_com_pos);
+            // mainBody.AddRelativeTorque(torque_damping);
+            // mainBody.AddRelativeForce(coriolisForce);
+            // // mainBody.AddRelativeTorque(coriolisTorque);
+            // mainBody.AddRelativeForce(lateralForce);
+            // // mainBody.AddRelativeTorque(lateralTorque);
+            // mainBody.AddRelativeForce(inputForce);
+            mainBody.AddForceAtPosition(inputForce,global_com_pos);
             mainBody.AddRelativeTorque(inputTorque);
 
 
